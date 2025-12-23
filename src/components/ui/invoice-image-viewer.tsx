@@ -15,7 +15,7 @@ export default function InvoiceImageViewer({
   images,
   onBack,
   headerActions,
-  accountNumber,
+  accountNumber: _accountNumber,
 }: InvoiceImageViewerProps) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
 

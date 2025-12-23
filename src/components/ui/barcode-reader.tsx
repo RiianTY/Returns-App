@@ -25,7 +25,7 @@ export default function BarcodeReader({
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [cameraId, setCameraId] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [lastResult, setLastResult] = useState<string | null>(null);
+  const [_lastResult, setLastResult] = useState<string | null>(null);
   const [detectedIsbn, setDetectedIsbn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
