@@ -76,7 +76,8 @@ export default function BarcodeReader({
     Html5Qrcode.getCameras()
       .then((devices) => {
         if (!mounted) return;
-        if (devices.length) setCameraId(devices[0].id);
+        if (devices.length) setCameraId(devices[1].id);
+        console.log("devices", devices);
       })
       .catch((e) => {
         if (!mounted) return;
