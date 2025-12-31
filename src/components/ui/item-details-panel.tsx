@@ -14,6 +14,7 @@ import {
 import InvoiceImageViewer from "@/components/ui/invoice-image-viewer";
 import { logger } from "@/lib/logger";
 import { toast } from "sonner";
+import { useState, useEffect, useRef } from "react";
 
 type ItemDetailsPanelProps = {
   returnsNumber: string;
@@ -64,6 +65,68 @@ export default function ItemDetailsPanel({
   onBack,
   requireTeamAndActionForCompleted = false,
 }: ItemDetailsPanelProps) {
+  // Track if user has scrolled to enable dropdown buttons
+  const [hasScrolled, setHasScrolled] = useState(false);
+  const mobileContainerRef = useRef<HTMLDivElement>(null);
+  const desktopContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleScroll = (element: HTMLElement | Window) => {
+      const scrollTop = element === window 
+        ? window.pageYOffset || document.documentElement.scrollTop
+        : (element as HTMLElement).scrollTop;
+      
+      if (scrollTop > 10) {
+        setHasScrolled(true);
+      } else {
+        setHasScrolled(false);
+      }
+    };
+
+    // Check initial scroll position
+    handleScroll(window);
+    if (mobileContainerRef.current) {
+      handleScroll(mobileContainerRef.current);
+    }
+    if (desktopContainerRef.current) {
+      handleScroll(desktopContainerRef.current);
+    }
+
+    // Listen for window scroll events
+    const handleWindowScroll = () => handleScroll(window);
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    
+    // Listen for container scroll events
+    const mobileContainer = mobileContainerRef.current;
+    const desktopContainer = desktopContainerRef.current;
+    
+    const handleMobileScroll = () => {
+      if (mobileContainer) handleScroll(mobileContainer);
+    };
+    
+    const handleDesktopScroll = () => {
+      if (desktopContainer) handleScroll(desktopContainer);
+    };
+
+    if (mobileContainer) {
+      mobileContainer.addEventListener('scroll', handleMobileScroll, { passive: true });
+    }
+    
+    if (desktopContainer) {
+      desktopContainer.addEventListener('scroll', handleDesktopScroll, { passive: true });
+    }
+
+    return () => {
+      window.removeEventListener('scroll', handleWindowScroll);
+      if (mobileContainer) {
+        mobileContainer.removeEventListener('scroll', handleMobileScroll);
+      }
+      if (desktopContainer) {
+        desktopContainer.removeEventListener('scroll', handleDesktopScroll);
+      }
+    };
+  }, []);
+
   const downloadAllImages = async (invoiceNumber: string, images: string[], accountNumber: string) => {
     if (images.length === 0) return;
 
@@ -121,10 +184,12 @@ export default function ItemDetailsPanel({
   return (
     <>
       {/* Desktop: Right Side - Details and Images (md+ only when item selected) */}
-      <div className="md:flex-1 md:flex md:flex-col hidden md:flex h-full overflow-y-auto">
+      <div ref={desktopContainerRef} className="md:flex-1 md:flex md:flex-col hidden md:flex h-full overflow-y-auto">
         {/* Details Form - Top Right */}
         <div className="shadow-md p-4 sm:p-6 flex flex-col gap-4 md:border-b">
-          
+          <Button className="sm:w-auto w-full md:w-auto" onClick={onBack}>
+            Back
+          </Button>
           <div className="flex flex-col gap-4">
             <div className="flex sm:flex-row sm:flex-wrap gap-2
             ">
@@ -177,7 +242,7 @@ export default function ItemDetailsPanel({
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={!invoiceNumber}>
+                <Button variant="outline" disabled={!invoiceNumber || !hasScrolled}>
                   {allocated ? `Team: ${allocated}` : "Allocate Team"}
                 </Button>
               </DropdownMenuTrigger>
@@ -209,7 +274,7 @@ export default function ItemDetailsPanel({
             {/* Action */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={!invoiceNumber}>
+                <Button variant="outline" disabled={!invoiceNumber || !hasScrolled}>
                   {action ? `Action: ${action}` : "Set Action"}
                 </Button>
               </DropdownMenuTrigger>
@@ -239,7 +304,7 @@ export default function ItemDetailsPanel({
             {/* Item Status */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={!invoiceNumber}>
+                <Button variant="outline" disabled={!invoiceNumber || !hasScrolled}>
                   {status ? `Status: ${status}` : "Set Status"}
                 </Button>
               </DropdownMenuTrigger>
@@ -298,9 +363,9 @@ export default function ItemDetailsPanel({
       </div>
 
       {/* Mobile: Show details form below list when item selected */}
-      <div className="md:hidden shadow-md p-4 sm:p-6 flex flex-col gap-4">
-        <Button className="sm:w-auto">
-          <a href="/">Home</a>
+      <div ref={mobileContainerRef} className="md:hidden shadow-md p-4 sm:p-6 flex flex-col gap-4">
+        <Button className="sm:w-auto" onClick={onBack}>
+          Back
         </Button>
         <div className="flex flex-col gap-4">
           <Label htmlFor="account-mobile">Account number:</Label>
@@ -350,7 +415,7 @@ export default function ItemDetailsPanel({
           {/* Team allocation */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={!invoiceNumber}>
+              <Button variant="outline" disabled={!invoiceNumber || !hasScrolled}>
                 {allocated ? `Team: ${allocated}` : "Allocate Team"}
               </Button>
             </DropdownMenuTrigger>
@@ -382,7 +447,7 @@ export default function ItemDetailsPanel({
           {/* Action */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={!invoiceNumber}>
+              <Button variant="outline" disabled={!invoiceNumber || !hasScrolled}>
                 {action ? `Action: ${action}` : "Set Action"}
               </Button>
             </DropdownMenuTrigger>
@@ -411,7 +476,7 @@ export default function ItemDetailsPanel({
           {/* Item Status */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={!invoiceNumber}>
+              <Button variant="outline" disabled={!invoiceNumber || !hasScrolled}>
                 {status ? `Status: ${status}` : "Set Status"}
               </Button>
             </DropdownMenuTrigger>

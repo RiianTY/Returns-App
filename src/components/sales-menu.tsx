@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { logger, sanitizeErrorMessage } from "@/lib/logger";
@@ -69,6 +69,9 @@ function SalesMenu() {
       // Store images and account number for display
       setSelectedItemImages(item.images || []);
       setSelectedItemAccountNumber(item.accountNumber || "");
+      
+      // Push state to browser history so browser back button works correctly
+      window.history.pushState({ invoiceNumber: item.InvoiceNumber }, '', window.location.pathname);
     }
   };
 
@@ -84,6 +87,21 @@ function SalesMenu() {
     setSelectedItemImages([]);
     setSelectedItemAccountNumber("");
   };
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      // When browser back button is pressed, clear the selected item to show list
+      if (invoiceNumber) {
+        handleBack();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [invoiceNumber]);
 
   const handleTeamChange = (value: string) => {
     setAllocated(value);

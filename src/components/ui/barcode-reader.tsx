@@ -31,6 +31,9 @@ export default function BarcodeReader({
 
   // capture UI state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // helpers: ISBN normalization & validation
   const isValidISBN10 = (isbn10: string) => {
@@ -263,22 +266,122 @@ export default function BarcodeReader({
     setScanning(false);
   };
 
-  // Capture helpers - use native mobile camera
+  // Capture helpers - use native mobile camera or desktop video stream
   const startCapture = async () => {
-    try {
-      // stop scanner to free camera resources
-      await stopScanner();
-    } catch {
-      /* ignore */
-    }
+    const isMobile = window.innerWidth < 768;
+    
+    // On mobile, use native camera app
+    if (isMobile) {
+      try {
+        // stop scanner to free camera resources
+        await stopScanner();
+      } catch {
+        /* ignore */
+      }
 
-    // Trigger native camera app with back camera preference (capture="environment")
-    // This will use the back camera on mobile devices, falling back to front if unavailable
-    if (fileInputRef.current) {
-      // Set capture attribute to "environment" for back camera
-      fileInputRef.current.setAttribute('capture', 'environment');
-      fileInputRef.current.click();
+      // Trigger native camera app with back camera preference (capture="environment")
+      // This will use the back camera on mobile devices, falling back to front if unavailable
+      if (fileInputRef.current) {
+        // Set capture attribute to "environment" for back camera
+        fileInputRef.current.setAttribute('capture', 'environment');
+        fileInputRef.current.click();
+      }
+    } else {
+      // On desktop, use inline video stream
+      try {
+        // stop scanner to free camera resources
+        await stopScanner();
+      } catch {
+        /* ignore */
+      }
+
+      // Start video stream for desktop capture
+      try {
+        if (!cameraId) {
+          setError("No camera selected");
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: cameraId } }
+        });
+        
+        streamRef.current = stream;
+        setCaptureOpen(true);
+        
+        // Wait for video element to be available
+        setTimeout(() => {
+          if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play();
+          }
+        }, 100);
+      } catch (e) {
+        setError(`Failed to start camera: ${e}`);
+        logger.error("Failed to start capture stream", e);
+      }
     }
+  };
+
+  const closeCapture = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCaptureOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !detectedIsbn) return;
+
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    
+    if (!ctx) return;
+
+    // Draw video frame to canvas
+    ctx.drawImage(video, 0, 0);
+
+    // Calculate square dimensions (use the smaller dimension)
+    const sourceSize = Math.min(canvas.width, canvas.height);
+    
+    // Calculate crop position to center the square
+    const sourceX = (canvas.width - sourceSize) / 2;
+    const sourceY = (canvas.height - sourceSize) / 2;
+    
+    // Resize to 720p (720x720 for square, maintaining aspect ratio)
+    const targetSize = 720;
+    const croppedCanvas = document.createElement("canvas");
+    croppedCanvas.width = targetSize;
+    croppedCanvas.height = targetSize;
+    const croppedCtx = croppedCanvas.getContext("2d");
+    
+    if (!croppedCtx) return;
+    
+    // Draw the cropped square portion, scaled to 720x720
+    croppedCtx.drawImage(
+      canvas,
+      sourceX, sourceY, sourceSize, sourceSize,  // source rectangle (crop from canvas)
+      0, 0, targetSize, targetSize               // destination rectangle (720x720)
+    );
+
+    // Convert to blob with high quality
+    croppedCanvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const fileName = `${detectedIsbn}_${Date.now()}.jpg`;
+        onCapture?.(detectedIsbn, fileName, blob);
+        closeCapture();
+      },
+      "image/jpeg",
+      0.95  // Higher quality (0.95 instead of 0.9)
+    );
   };
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -306,24 +409,25 @@ export default function BarcodeReader({
         const sourceX = (img.width - sourceSize) / 2;
         const sourceY = (img.height - sourceSize) / 2;
         
-        // Create canvas with fixed 128x128 output size
+        // Resize to 720p (720x720 for square, maintaining aspect ratio)
+        const targetSize = 720;
         const canvas = document.createElement("canvas");
-        canvas.width = 128;
-        canvas.height = 128;
+        canvas.width = targetSize;
+        canvas.height = targetSize;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           URL.revokeObjectURL(objectUrl);
           return;
         }
         
-        // Draw the cropped square portion of the image, scaled to 128x128
+        // Draw the cropped square portion of the image, scaled to 720x720
         ctx.drawImage(
           img,
           sourceX, sourceY, sourceSize, sourceSize,  // source rectangle (crop from image)
-          0, 0, 128, 128                             // destination rectangle (128x128 output)
+          0, 0, targetSize, targetSize               // destination rectangle (720x720)
         );
 
-        // convert to blob
+        // convert to blob with high quality
         canvas.toBlob(
           (blob) => {
             URL.revokeObjectURL(objectUrl);
@@ -332,7 +436,7 @@ export default function BarcodeReader({
             onCapture?.(isbn, fileName, blob);
           },
           "image/jpeg",
-          0.9
+          0.95  // Higher quality (0.95 instead of 0.9)
         );
       };
       
@@ -356,17 +460,21 @@ export default function BarcodeReader({
     <div className="space-y-3">
       {!scanning && (
         <div className="flex gap-2 items-center justify-between">
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center w-full md:w-auto">
             <button
-              className="px-3 py-2 bg-green-500 text-white rounded"
+              className="px-3 py-2 bg-green-500 text-white rounded flex-1 md:flex-none"
               onClick={startScanner}
             >
               Barcode Reader
             </button>
-            {additionalButtons}
+            {additionalButtons && (
+              <div className="flex-1 md:flex-none">
+                {additionalButtons}
+              </div>
+            )}
           </div>
           {rightContent && (
-            <div className="flex items-center">
+            <div className="flex items-center hidden md:flex">
               {rightContent}
             </div>
           )}
@@ -408,7 +516,47 @@ export default function BarcodeReader({
         <div className="text-sm text-red-600">Error: {error}</div>
       )}
 
-      {/* Hidden file input for native camera capture - fullscreen on mobile */}
+      {/* Desktop capture window (modal) */}
+      {captureOpen && (
+        <div className="fixed inset-0 z-50 bg-black bg-opacity-75 flex items-center justify-center md:block">
+          <div className="bg-white rounded-lg p-4 md:p-6 max-w-2xl w-full mx-4 md:mx-auto md:mt-8">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Capture Photo</h3>
+              <button
+                onClick={closeCapture}
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className="w-full max-w-md rounded-lg bg-black"
+                style={{ maxHeight: '70vh' }}
+              />
+              <div className="flex gap-4">
+                <button
+                  onClick={capturePhoto}
+                  className="px-6 py-3 bg-green-500 text-white rounded hover:bg-green-600"
+                >
+                  Capture
+                </button>
+                <button
+                  onClick={closeCapture}
+                  className="px-6 py-3 bg-gray-500 text-white rounded hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden file input for native camera capture - mobile only */}
       <input
         ref={fileInputRef}
         type="file"

@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
-import { Button } from "./button";
 import { logger } from "@/lib/logger";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemHeader,
+} from "@/components/ui/item";
 
 type InvoiceImageViewerProps = {
   invoiceNumber: string;
@@ -10,14 +16,26 @@ type InvoiceImageViewerProps = {
   accountNumber?: string;
 };
 
+// Helper function to format file size
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+}
+
 export default function InvoiceImageViewer({
   invoiceNumber,
   images,
-  onBack,
+  onBack: _onBack,
   headerActions,
   accountNumber: _accountNumber,
 }: InvoiceImageViewerProps) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const [imageSizes, setImageSizes] = useState<{ [key: number]: number }>({});
 
   // Extract filename from URL
   const getFilename = (index: number): string => {
@@ -30,6 +48,51 @@ export default function InvoiceImageViewer({
       return `image-${index + 1}`;
     }
   };
+
+  // Extract ISBN from filename (format: isbn_timestamp.jpg)
+  const getISBN = (index: number): string => {
+    try {
+      const filename = getFilename(index);
+      // Filename format is typically: isbn_timestamp.jpg
+      const parts = filename.split('_');
+      if (parts.length >= 1) {
+        return parts[0];
+      }
+      return 'N/A';
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  // Fetch image size
+  useEffect(() => {
+    const fetchImageSizes = async () => {
+      const sizes: { [key: number]: number } = {};
+      await Promise.all(
+        images.map(async (url, index) => {
+          try {
+            const response = await fetch(url, { method: 'HEAD' });
+            const contentLength = response.headers.get('content-length');
+            if (contentLength) {
+              sizes[index] = parseInt(contentLength, 10);
+            } else {
+              // Fallback: fetch the full image
+              const imgResponse = await fetch(url);
+              const blob = await imgResponse.blob();
+              sizes[index] = blob.size;
+            }
+          } catch (error) {
+            logger.error(`Error fetching image size for ${url}:`, error);
+          }
+        })
+      );
+      setImageSizes(sizes);
+    };
+
+    if (images.length > 0) {
+      fetchImageSizes();
+    }
+  }, [images]);
 
   const openImageViewer = (index: number) => {
     setSelectedImageIndex(index);
@@ -105,7 +168,6 @@ export default function InvoiceImageViewer({
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="font-medium">Images for {invoiceNumber}</h3>
-          <Button onClick={onBack}>Back</Button>
         </div>
         <p className="text-sm text-gray-500">No images found</p>
       </div>
@@ -118,28 +180,44 @@ export default function InvoiceImageViewer({
         {/* show account number and invoice number above the images-viewer header (may not be needed) */}
         {/* <h3 className="font-medium pb-2">Images for {accountNumber ? `Acc: ${accountNumber} -` : ""} Inv: {invoiceNumber}</h3> */}
         <div className="flex gap-2 items-center">
-          <Button onClick={onBack}>Back</Button>
           {headerActions}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      <ItemGroup className="flex flex-row flex-wrap gap-2">
         {images.map((src, i) => (
-          <div key={i} className="flex flex-col">
-            <img
-              src={src}
-              alt={`img-${i}`}
-              className="w-full max-w-[300px] h-auto max-h-[300px] 
-              object-contain rounded cursor-pointer hover:opacity-80 
-              transition-opacity mx-auto"
-              onClick={() => openImageViewer(i)}
-            />
-            <p className="text-xs text-muted-foreground mt-1 text-center truncate" title={getFilename(i)}>
-              {getFilename(i)}
-            </p>
-          </div>
+          <Item 
+            key={i} 
+            variant="outline" 
+            className="flex flex-row bg-white rounded-md relative w-[calc(50%-0.25rem)] md:w-auto min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => openImageViewer(i)}
+          >
+            <ItemHeader className="flex justify-center">
+              <img
+                src={src}
+                alt={`img-${i}`}
+                className="w-28 h-28 object-cover rounded-sm text-wrap text-center"
+                onError={(e) => {
+                  console.error("Failed to load image:", src);
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                }}
+                onLoad={() => {
+                  console.log("Image loaded:", src);
+                }}
+              />
+            </ItemHeader>
+            <ItemContent className="text-center flex-1 flex flex-col items-center text-wrap justify-center w-24">
+              <ItemDescription className="text-muted-foreground text-xs text-center">
+                ISBN: {getISBN(i)}
+              </ItemDescription>
+              <ItemDescription className="text-muted-foreground text-xs text-center">
+                Size: {imageSizes[i] ? formatFileSize(imageSizes[i]) : 'Loading...'}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
         ))}
-      </div>
+      </ItemGroup>
 
       {/* Image Viewer Modal */}
       {selectedImageIndex !== null && (

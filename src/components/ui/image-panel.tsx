@@ -235,23 +235,22 @@ export default function ImagePanel({
 
 
   return (
-    <div className="bg-white rounded-2xl shadow-inner p-4 sm:p-6">
+    <div className="bg-white w-full rounded-2xl shadow-inner p-4 sm:p-6">
       <BarcodeReader
         onCapture={handleCapture}
         additionalButtons={
           <button
-            className="px-3 py-2 bg-orange-500 text-white rounded"
+            className="px-3 py-2 bg-orange-500 text-white rounded w-full md:w-auto"
             onClick={handleAddNotAuth}
           >
             Not Auth
           </button>
         }
-        rightContent={
-          <div className="text-md text-gray-600 whitespace-nowrap">
-            Queued: {gallery.length}
-          </div>
-        }
       />
+
+      <div className="mt-3 text-md text-gray-600 text-left">
+        Queued: {gallery.length}
+      </div>
 
       <div className="mt-4">
         <Gallery

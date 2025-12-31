@@ -22,6 +22,17 @@ type GalleryProps = {
   onRemove: (id: string) => void;
 };
 
+// Helper function to format file size
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+}
+
 export default function Gallery({
   items,
   onRemove,
@@ -33,13 +44,13 @@ export default function Gallery({
           <Item 
             key={item.id} 
             variant="outline" 
-            className="flex flex-row bg-white rounded-md relative w-50"
+            className="flex flex-row bg-white rounded-md relative w-[calc(50%-0.25rem)] md:w-auto min-w-0"
           >
             <ItemHeader className="flex justify-center">
               <img
                 src={item.preview}
                 alt={item.fileName}
-                className="w-32 h-32 object-cover rounded-sm text-wrap text-center"
+                className="w-28 h-28 object-cover rounded-sm text-wrap text-center"
                 onError={(e) => {
                   console.error("Failed to load image preview:", item.preview, item.fileName);
                   const target = e.target as HTMLImageElement;
@@ -54,8 +65,8 @@ export default function Gallery({
               <ItemDescription className="text-muted-foreground text-xs text-center">
                 ISBN: {item.isbn}
               </ItemDescription>
-              <ItemDescription className="text-muted-foreground text-xs text-center break-words">
-                File: {item.fileName}
+              <ItemDescription className="text-muted-foreground text-xs text-center">
+                Size: {formatFileSize(item.blob.size)}
               </ItemDescription>
               <ItemDescription className="text-muted-foreground text-xs text-center">
                 Status:{" "}

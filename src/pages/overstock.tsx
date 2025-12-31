@@ -1,4 +1,6 @@
 import { useState, useRef } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 import FormData from "@/components/ui/form-data";
 import ImagePanel from "@/components/ui/image-panel";
 import type { UploadResult } from "@/components/ui/upload";
@@ -12,6 +14,9 @@ export default function Overstock() {
 
   return (
     <div className="w-full h-full bg-white m-0 p-4 sm:p-6 flex flex-col gap-4 sm:gap-6">
+      <Button asChild className="w-fit">
+        <Link to="/">Back</Link>
+      </Button>
       {/* Top Row */}
       <FormData 
         key="overstock-form"
