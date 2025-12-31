@@ -30,9 +30,7 @@ export default function BarcodeReader({
   const [error, setError] = useState<string | null>(null);
 
   // capture UI state
-  const [captureOpen, setCaptureOpen] = useState(false);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // helpers: ISBN normalization & validation
   const isValidISBN10 = (isbn10: string) => {
@@ -168,32 +166,10 @@ export default function BarcodeReader({
     return () => {
       mounted = false;
       stopScanner();
-      stopCaptureStream();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle video stream attachment when capture modal opens
-  useEffect(() => {
-    if (!captureOpen || !streamRef.current) return;
-
-    // Wait for video element to be available in DOM
-    const attachStream = () => {
-      if (videoRef.current && streamRef.current) {
-        const video = videoRef.current;
-        video.srcObject = streamRef.current;
-        video.play().catch((err) => {
-          logger.error("Video play error:", err);
-          setError("Failed to start video");
-        });
-      } else {
-        // Retry if video element not ready yet
-        setTimeout(attachStream, 50);
-      }
-    };
-
-    attachStream();
-  }, [captureOpen]);
 
   const startScanner = async () => {
     setError(null);
@@ -254,22 +230,7 @@ export default function BarcodeReader({
     setScanning(false);
   };
 
-  // Capture helpers
-  const stopCaptureStream = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      try {
-        videoRef.current.pause();
-        videoRef.current.srcObject = null;
-      } catch {
-        /* ignore */
-      }
-    }
-  };
-
+  // Capture helpers - use native mobile camera
   const startCapture = async () => {
     try {
       // stop scanner to free camera resources
@@ -278,113 +239,84 @@ export default function BarcodeReader({
       /* ignore */
     }
 
-    try {
-      // Try to use the selected camera ID first (which should be back-facing)
-      // If that fails or no cameraId, try environment facingMode (back camera)
-      // If that also fails, fall back to user facingMode (front camera)
-      let stream: MediaStream | null = null;
-      
-      if (cameraId) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: cameraId } },
-            audio: false,
-          });
-        } catch (e) {
-          // If exact device fails, try without exact constraint
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: { deviceId: cameraId },
-              audio: false,
-            });
-          } catch (e2) {
-            logger.log("Failed to use cameraId, trying facingMode", e2);
-          }
-        }
-      }
-      
-      // If no stream yet, try environment (back) facing mode
-      if (!stream) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" },
-            audio: false,
-          });
-        } catch (e) {
-          logger.log("Failed to use environment camera, trying user (front)", e);
-        }
-      }
-      
-      // If still no stream, fall back to user (front) facing mode
-      if (!stream) {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        });
-      }
-      
-      if (stream) {
-        streamRef.current = stream;
-        setCaptureOpen(true);
-      } else {
-        throw new Error("Could not access any camera");
-      }
-    } catch (e) {
-      setError(String(e));
-      // try to resume scanner if capture failed
-      setCaptureOpen(false);
-      startScanner().catch(() => {});
+    // Trigger native camera app with back camera preference (capture="environment")
+    // This will use the back camera on mobile devices, falling back to front if unavailable
+    if (fileInputRef.current) {
+      // Set capture attribute to "environment" for back camera
+      fileInputRef.current.setAttribute('capture', 'environment');
+      fileInputRef.current.click();
     }
   };
 
-  const captureImage = async () => {
-    const video = videoRef.current;
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     const isbn = detectedIsbn;
-    if (!video || !isbn) return;
     
-    const videoWidth = video.videoWidth || 1280;
-    const videoHeight = video.videoHeight || 720;
-    
-    // Calculate square dimensions (use the smaller dimension)
-    const sourceSize = Math.min(videoWidth, videoHeight);
-    
-    // Calculate crop position to center the square
-    const sourceX = (videoWidth - sourceSize) / 2;
-    const sourceY = (videoHeight - sourceSize) / 2;
-    
-    // Create canvas with fixed 128x128 output size
-    const canvas = document.createElement("canvas");
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    
-    // Draw the cropped square portion of the video, scaled to 128x128
-    ctx.drawImage(
-      video,
-      sourceX, sourceY, sourceSize, sourceSize,  // source rectangle (crop from video)
-      0, 0, 128, 128                             // destination rectangle (128x128 output)
-    );
+    if (!file || !isbn) {
+      // Reset input so same file can be selected again
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
 
-    // convert to blob
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return;
-        const fileName = `${isbn}_${Date.now()}.jpg`;
-        onCapture?.(isbn, fileName, blob);
-      },
-      "image/jpeg",
-      0.9
-    );
+    try {
+      // Create image from file
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      
+      img.onload = () => {
+        // Calculate square dimensions (use the smaller dimension)
+        const sourceSize = Math.min(img.width, img.height);
+        
+        // Calculate crop position to center the square
+        const sourceX = (img.width - sourceSize) / 2;
+        const sourceY = (img.height - sourceSize) / 2;
+        
+        // Create canvas with fixed 128x128 output size
+        const canvas = document.createElement("canvas");
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        
+        // Draw the cropped square portion of the image, scaled to 128x128
+        ctx.drawImage(
+          img,
+          sourceX, sourceY, sourceSize, sourceSize,  // source rectangle (crop from image)
+          0, 0, 128, 128                             // destination rectangle (128x128 output)
+        );
 
-    // cleanup
-    stopCaptureStream();
-    setCaptureOpen(false);
-  };
-
-  const cancelCapture = () => {
-    stopCaptureStream();
-    setCaptureOpen(false);
+        // convert to blob
+        canvas.toBlob(
+          (blob) => {
+            URL.revokeObjectURL(objectUrl);
+            if (!blob) return;
+            const fileName = `${isbn}_${Date.now()}.jpg`;
+            onCapture?.(isbn, fileName, blob);
+          },
+          "image/jpeg",
+          0.9
+        );
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        setError("Failed to load image");
+      };
+      
+      img.src = objectUrl;
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      // Reset input so same file can be selected again
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   return (
@@ -421,45 +353,15 @@ export default function BarcodeReader({
         <div className="text-sm text-red-600">Error: {error}</div>
       )}
 
-      {/* Capture modal */}
-      {captureOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-white rounded-lg overflow-hidden max-w-md w-full">
-            <div className="p-2 bg-gray-800 text-white text-sm flex justify-between items-center">
-              <div>Capture photo for ISBN: {detectedIsbn}</div>
-              <div className="text-xs text-gray-200">
-                Filename: {detectedIsbn}_{Date.now()}.jpg
-              </div>
-            </div>
-
-            <div className="bg-black flex items-center justify-center aspect-square overflow-hidden">
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover"
-                playsInline
-                muted
-                autoPlay
-                style={{ transform: 'scale(1.0)' }}
-              />
-            </div>
-
-            <div className="flex gap-2 p-3">
-              <button
-                className="flex-1 px-3 py-2 bg-blue-600 text-white rounded"
-                onClick={captureImage}
-              >
-                Capture
-              </button>
-              <button
-                className="flex-1 px-3 py-2 bg-gray-300 text-black rounded"
-                onClick={cancelCapture}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Hidden file input for native camera capture */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+      />
     </div>
   );
 }
