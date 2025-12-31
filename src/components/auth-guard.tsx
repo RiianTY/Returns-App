@@ -40,6 +40,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     try {
       await signIn(email, password);
       // Authentication state will be updated via the auth state change listener
+      // After successful login, user will see the protected content automatically
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to sign in");
     } finally {
