@@ -129,7 +129,9 @@ export default function InvoiceImageViewer({
             <img
               src={src}
               alt={`img-${i}`}
-              className="w-full max-w-[300px] h-auto max-h-[300px] object-contain rounded cursor-pointer hover:opacity-80 transition-opacity mx-auto"
+              className="w-full max-w-[300px] h-auto max-h-[300px] 
+              object-contain rounded cursor-pointer hover:opacity-80 
+              transition-opacity mx-auto"
               onClick={() => openImageViewer(i)}
             />
             <p className="text-xs text-muted-foreground mt-1 text-center truncate" title={getFilename(i)}>

@@ -71,19 +71,99 @@ export default function BarcodeReader({
     return null;
   };
 
+  // Helper function to find back-facing camera
+  const findBackCamera = (devices: Array<{ id: string; label?: string }>): string | null => {
+    if (!devices.length) return null;
+
+    // First, try to find a back-facing camera by label keywords
+    const backKeywords = ['back', 'rear', 'environment', 'rear-facing', 'back-facing'];
+    const backCamera = devices.find(device => {
+      const label = (device.label || '').toLowerCase();
+      return backKeywords.some(keyword => label.includes(keyword));
+    });
+
+    if (backCamera) {
+      return backCamera.id;
+    }
+
+    // If no back camera found by label, try to use MediaDevices API to check facingMode
+    // For now, fall back to the last device (often the back camera on mobile)
+    // or use the second device if available (common pattern on mobile)
+    if (devices.length > 1) {
+      // On many mobile devices, the back camera is the second one
+      return devices[devices.length - 1].id;
+    }
+
+    // If only one device, use it (will be front camera, but better than nothing)
+    return devices[0].id;
+  };
+
   useEffect(() => {
     let mounted = true;
-    Html5Qrcode.getCameras()
-      .then((devices) => {
-        if (!mounted) return;
-        // change to second device for back facing camera for mobile devices
-        if (devices.length) setCameraId(devices[0].id);
-        console.log("devices", devices);
-      })
-      .catch((e) => {
-        if (!mounted) return;
-        setError(String(e));
-      });
+    
+    // First, try to get cameras from native MediaDevices API for better detection
+    const getBestCamera = async () => {
+      let cameraSelected = false;
+      
+      try {
+        // Request permission and get detailed device info
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(track => track.stop()); // Stop immediately, we just needed permission
+        
+        const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = mediaDevices.filter(device => device.kind === 'videoinput');
+        
+        if (videoDevices.length && mounted) {
+          // Find back-facing camera by label
+          const backKeywords = ['back', 'rear', 'environment', 'rear-facing', 'back-facing'];
+          const backCamera = videoDevices.find(device => {
+            const label = (device.label || '').toLowerCase();
+            return backKeywords.some(keyword => label.includes(keyword));
+          });
+          
+          if (backCamera) {
+            setCameraId(backCamera.deviceId);
+            cameraSelected = true;
+            return;
+          }
+          
+          // If no back camera found by label, use the last device (often back camera on mobile)
+          if (videoDevices.length > 1) {
+            setCameraId(videoDevices[videoDevices.length - 1].deviceId);
+            cameraSelected = true;
+            return;
+          }
+          
+          // Fall back to first device
+          setCameraId(videoDevices[0].deviceId);
+          cameraSelected = true;
+        }
+      } catch (e) {
+        // If MediaDevices API fails, fall back to Html5Qrcode
+        logger.log("MediaDevices API failed, using Html5Qrcode", e);
+      }
+      
+      // Fallback to Html5Qrcode.getCameras() only if MediaDevices didn't work
+      if (!cameraSelected) {
+        Html5Qrcode.getCameras()
+          .then((devices) => {
+            if (!mounted) return;
+            if (devices.length) {
+              const selectedCameraId = findBackCamera(devices);
+              if (selectedCameraId) {
+                setCameraId(selectedCameraId);
+              }
+            }
+            console.log("devices", devices);
+          })
+          .catch((e) => {
+            if (!mounted) return;
+            setError(String(e));
+          });
+      }
+    };
+    
+    getBestCamera();
 
     return () => {
       mounted = false;
@@ -199,14 +279,56 @@ export default function BarcodeReader({
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: cameraId
-          ? { deviceId: { exact: cameraId } }
-          : { facingMode: "environment" },
-        audio: false,
-      });
-      streamRef.current = stream;
-      setCaptureOpen(true);
+      // Try to use the selected camera ID first (which should be back-facing)
+      // If that fails or no cameraId, try environment facingMode (back camera)
+      // If that also fails, fall back to user facingMode (front camera)
+      let stream: MediaStream | null = null;
+      
+      if (cameraId) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: cameraId } },
+            audio: false,
+          });
+        } catch (e) {
+          // If exact device fails, try without exact constraint
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: cameraId },
+              audio: false,
+            });
+          } catch (e2) {
+            logger.log("Failed to use cameraId, trying facingMode", e2);
+          }
+        }
+      }
+      
+      // If no stream yet, try environment (back) facing mode
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false,
+          });
+        } catch (e) {
+          logger.log("Failed to use environment camera, trying user (front)", e);
+        }
+      }
+      
+      // If still no stream, fall back to user (front) facing mode
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        });
+      }
+      
+      if (stream) {
+        streamRef.current = stream;
+        setCaptureOpen(true);
+      } else {
+        throw new Error("Could not access any camera");
+      }
     } catch (e) {
       setError(String(e));
       // try to resume scanner if capture failed
