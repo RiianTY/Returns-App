@@ -170,6 +170,34 @@ export default function BarcodeReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Add CSS to ensure scanner video fills container on mobile
+  useEffect(() => {
+    if (scanning) {
+      const style = document.createElement('style');
+      style.textContent = `
+        #${containerIdRef.current} video,
+        #${containerIdRef.current} canvas {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+        }
+        @media (min-width: 768px) {
+          #${containerIdRef.current} video,
+          #${containerIdRef.current} canvas {
+            width: auto !important;
+            height: auto !important;
+            object-fit: contain !important;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+      return () => {
+        if (document.head.contains(style)) {
+          document.head.removeChild(style);
+        }
+      };
+    }
+  }, [scanning]);
 
   const startScanner = async () => {
     setError(null);
@@ -183,11 +211,16 @@ export default function BarcodeReader({
     }
 
     try {
+      // On mobile, use larger qrbox for better scanning experience
+      const isMobile = window.innerWidth < 768;
+      const mobileQrbox = isMobile ? { width: 300, height: 300 } : qrbox;
+      
       await scannerRef.current.start(
         cameraId,
         {
           fps,
-          qrbox,
+          qrbox: mobileQrbox,
+          aspectRatio: 1.0, // Square aspect ratio for better mobile experience
         },
         (decodedText) => {
           // attempt to extract ISBN
@@ -321,39 +354,61 @@ export default function BarcodeReader({
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-2 items-center justify-between">
-        <div className="flex gap-2 items-center">
-          {!scanning ? (
+      {!scanning && (
+        <div className="flex gap-2 items-center justify-between">
+          <div className="flex gap-2 items-center">
             <button
               className="px-3 py-2 bg-green-500 text-white rounded"
               onClick={startScanner}
             >
               Barcode Reader
             </button>
-          ) : (
+            {additionalButtons}
+          </div>
+          {rightContent && (
+            <div className="flex items-center">
+              {rightContent}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Fullscreen container on mobile when scanning */}
+      <div className={`${scanning ? 'fixed inset-0 z-50 bg-black md:relative md:z-auto md:bg-transparent flex flex-col' : ''}`}>
+        {scanning && (
+          <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-center md:relative md:top-0 md:left-0 md:right-0 md:mb-2">
             <button
               className="px-3 py-2 bg-red-500 text-white rounded"
               onClick={stopScanner}
             >
               Stop
             </button>
-          )}
-          {additionalButtons}
-        </div>
-        {rightContent && (
-          <div className="flex items-center">
-            {rightContent}
+            {rightContent && (
+              <div className="flex items-center text-white md:text-gray-600">
+                {rightContent}
+              </div>
+            )}
           </div>
         )}
+        <div 
+          id={containerIdRef.current} 
+          className={`w-full ${scanning ? 'flex-1 md:flex-none' : ''}`}
+          style={scanning ? { 
+            minHeight: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            height: '100%'
+          } : {}}
+        />
       </div>
-
-      <div id={containerIdRef.current} className="w-full" />
 
       {error && (
         <div className="text-sm text-red-600">Error: {error}</div>
       )}
 
-      {/* Hidden file input for native camera capture */}
+      {/* Hidden file input for native camera capture - fullscreen on mobile */}
       <input
         ref={fileInputRef}
         type="file"
