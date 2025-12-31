@@ -85,10 +85,34 @@ export async function uploadGalleryItem(item: GalleryItem) {
   const bucket = normalizeBucket(rawBucket);
   if (!bucket) throw new Error("No bucket specified for upload.");
 
-  // folder (invoice number) as requested
+  // Create nested folder structure: month_year/day/time_invoiceNumber
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0'); // getMonth() returns 0-11
+  const year = now.getFullYear();
+  
+  // Get current time in 12-hour format (e.g., "10.30pm")
+  const hours24 = now.getHours();
+  const hours12 = hours24 === 0 ? 12 : hours24 > 12 ? hours24 - 12 : hours24;
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const ampm = hours24 >= 12 ? 'pm' : 'am';
+  const timePrefix = `${hours12}.${minutes}${ampm}`;
+  
+  // Top level: month_year (e.g., "01_2024")
+  const monthYearFolder = `${month}_${year}`;
+  
+  // Second level: day (e.g., "15")
+  const dayFolder = day;
+  
+  // Third level: time_invoiceNumber (e.g., "10.30pm_12345")
   // @ts-ignore allow invoiceNumber if present on item
   const rawFolder = (item as any).invoiceNumber ?? item.isbn ?? "unknown";
-  const folder = sanitizeFolder(String(rawFolder));
+  const invoiceFolder = sanitizeFolder(String(rawFolder));
+  // Use underscore to separate time and invoice number (time has dots and am/pm)
+  const timeInvoiceFolder = `${timePrefix}_${invoiceFolder}`;
+  
+  // Combined folder path: month_year/day/time_invoiceNumber
+  const folder = `${monthYearFolder}/${dayFolder}/${timeInvoiceFolder}`;
 
   // build filename: isbn + random numbers + timestamp
   const isbnBase = sanitizeBase(item.isbn ?? item.fileName ?? "image");
@@ -273,8 +297,79 @@ export async function insertOverstockData(
     }
   }
 
-  // Use Supabase client with RLS (no service role key)
-  // RLS policies must be configured in Supabase dashboard
+  // Check if a record with this invoice number already exists
+  const { data: existingData, error: checkError } = await supabase
+    .from("returns-app")
+    .select("images, warehouse_notes")
+    .eq("InvoiceNumber", invoiceNum)
+    .single();
+
+  if (checkError && checkError.code !== "PGRST116") {
+    // PGRST116 is "not found" - that's fine, we'll insert new
+    // Any other error is a problem
+    logger.error("Error checking for existing record:", checkError);
+    throw new Error("Failed to check for existing record. Please try again.");
+  }
+
+  if (existingData) {
+    // Record exists - append new images to existing ones
+    logger.log("Record exists, appending images to existing record");
+    
+    // Parse existing images (handle both array and JSON string)
+    let existingImages: string[] = [];
+    if (existingData.images) {
+      if (typeof existingData.images === 'string') {
+        try {
+          existingImages = JSON.parse(existingData.images);
+        } catch {
+          existingImages = [existingData.images];
+        }
+      } else if (Array.isArray(existingData.images)) {
+        existingImages = existingData.images;
+      }
+    }
+    
+    // Merge images, avoiding duplicates
+    const allImages = [...existingImages];
+    imageUrls.forEach(url => {
+      if (!allImages.includes(url)) {
+        allImages.push(url);
+      }
+    });
+    
+    // Merge warehouse notes (append new reason if provided)
+    let updatedWarehouseNotes = existingData.warehouse_notes || "";
+    if (sanitizedReason) {
+      if (updatedWarehouseNotes) {
+        updatedWarehouseNotes = `${updatedWarehouseNotes}\n${sanitizedReason}`;
+      } else {
+        updatedWarehouseNotes = sanitizedReason;
+      }
+    }
+    
+    // Update the existing record
+    const { data, error } = await supabase
+      .from("returns-app")
+      .update({
+        images: allImages,
+        warehouse_notes: updatedWarehouseNotes,
+      })
+      .eq("InvoiceNumber", invoiceNum)
+      .select();
+    
+    if (error) {
+      logger.error("Supabase update error:", error);
+      if (error.code === "42501") {
+        throw new Error("You do not have permission to perform this action. Please contact your administrator.");
+      }
+      throw new Error("Failed to update existing record. Please try again.");
+    }
+    
+    logger.log(`Successfully appended ${imageUrls.length} image(s) to existing record. Total images: ${allImages.length}`);
+    return data;
+  }
+
+  // No existing record - insert new one
   const rowData = {
     InvoiceNumber: invoiceNum,
     rNumber: rNum,
@@ -299,15 +394,6 @@ export async function insertOverstockData(
     // Provide user-friendly error messages
     if (error.code === "42501") {
       throw new Error("You do not have permission to perform this action. Please contact your administrator.");
-    }
-    
-    // Handle duplicate key constraint violation (PostgreSQL error code 23505)
-    if (error.code === "23505") {
-      // Check if it's related to invoice number (returns-app_pkey)
-      if (error.message?.includes('returns-app_pkey') || error.message?.includes('InvoiceNumber')) {
-        throw new Error("Invoice number already exists. Please use a different invoice number.");
-      }
-      throw new Error("This record already exists. Please check your input and try again.");
     }
     
     throw new Error("Failed to save data. Please try again.");
@@ -365,8 +451,79 @@ export async function insertDamagesData(
     }
   }
 
-  // Use Supabase client with RLS (no service role key)
-  // RLS policies must be configured in Supabase dashboard
+  // Check if a record with this invoice number already exists
+  const { data: existingData, error: checkError } = await supabase
+    .from("returns-app")
+    .select("images, warehouse_notes")
+    .eq("InvoiceNumber", invoiceNum)
+    .single();
+
+  if (checkError && checkError.code !== "PGRST116") {
+    // PGRST116 is "not found" - that's fine, we'll insert new
+    // Any other error is a problem
+    logger.error("Error checking for existing record:", checkError);
+    throw new Error("Failed to check for existing record. Please try again.");
+  }
+
+  if (existingData) {
+    // Record exists - append new images to existing ones
+    logger.log("Record exists, appending images to existing record");
+    
+    // Parse existing images (handle both array and JSON string)
+    let existingImages: string[] = [];
+    if (existingData.images) {
+      if (typeof existingData.images === 'string') {
+        try {
+          existingImages = JSON.parse(existingData.images);
+        } catch {
+          existingImages = [existingData.images];
+        }
+      } else if (Array.isArray(existingData.images)) {
+        existingImages = existingData.images;
+      }
+    }
+    
+    // Merge images, avoiding duplicates
+    const allImages = [...existingImages];
+    imageUrls.forEach(url => {
+      if (!allImages.includes(url)) {
+        allImages.push(url);
+      }
+    });
+    
+    // Merge warehouse notes (append new reason if provided)
+    let updatedWarehouseNotes = existingData.warehouse_notes || "";
+    if (sanitizedReason) {
+      if (updatedWarehouseNotes) {
+        updatedWarehouseNotes = `${updatedWarehouseNotes}\n${sanitizedReason}`;
+      } else {
+        updatedWarehouseNotes = sanitizedReason;
+      }
+    }
+    
+    // Update the existing record
+    const { data, error } = await supabase
+      .from("returns-app")
+      .update({
+        images: allImages,
+        warehouse_notes: updatedWarehouseNotes,
+      })
+      .eq("InvoiceNumber", invoiceNum)
+      .select();
+    
+    if (error) {
+      logger.error("Supabase update error:", error);
+      if (error.code === "42501") {
+        throw new Error("You do not have permission to perform this action. Please contact your administrator.");
+      }
+      throw new Error("Failed to update existing record. Please try again.");
+    }
+    
+    logger.log(`Successfully appended ${imageUrls.length} image(s) to existing record. Total images: ${allImages.length}`);
+    return data;
+  }
+
+  // No existing record - insert new one
   const rowData = {
     InvoiceNumber: invoiceNum,
     rNumber: null, // No returns number for damages
@@ -391,15 +548,6 @@ export async function insertDamagesData(
     // Provide user-friendly error messages
     if (error.code === "42501") {
       throw new Error("You do not have permission to perform this action. Please contact your administrator.");
-    }
-    
-    // Handle duplicate key constraint violation (PostgreSQL error code 23505)
-    if (error.code === "23505") {
-      // Check if it's related to invoice number (returns-app_pkey)
-      if (error.message?.includes('returns-app_pkey') || error.message?.includes('InvoiceNumber')) {
-        throw new Error("Invoice number already exists. Please use a different invoice number.");
-      }
-      throw new Error("This record already exists. Please check your input and try again.");
     }
     
     throw new Error("Failed to save data. Please try again.");
