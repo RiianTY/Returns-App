@@ -155,7 +155,6 @@ export default function BarcodeReader({
                 setCameraId(selectedCameraId);
               }
             }
-            console.log("devices", devices);
           })
           .catch((e) => {
             if (!mounted) return;

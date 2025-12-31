@@ -10,6 +10,8 @@ export type ImagePanelProps = {
   onUploadAllUnuploadedReady?: (uploadFn: () => Promise<UploadResult[]>) => void; // Expose upload function
   onClearGalleryReady?: (clearFn: () => void) => void; // Expose clear gallery function
   onUnmarkUploadedReady?: (unmarkFn: (itemIds: string[]) => void) => void; // Expose unmark uploaded function
+  isOverstock?: boolean; // If true, restrict "Not Auth" button to one press
+  isDamages?: boolean; // If true, restrict "Not Auth" button to one press
 };
 
 export default function ImagePanel({ 
@@ -17,12 +19,18 @@ export default function ImagePanel({
   invoiceNumber,
   onUploadAllUnuploadedReady,
   onClearGalleryReady,
-  onUnmarkUploadedReady
+  onUnmarkUploadedReady,
+  isOverstock = false,
+  isDamages = false
 }: ImagePanelProps) {
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
+  const [notAuthPressed, setNotAuthPressed] = useState(false);
   const galleryRef = useRef<GalleryItem[]>([]);
   const uploadResultsRef = useRef<UploadResult[]>([]);
+  
+  // Check if "Not Auth" button should be restricted (overstock or damages)
+  const restrictNotAuth = isOverstock || isDamages;
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -74,6 +82,11 @@ export default function ImagePanel({
   );
 
   const handleAddNotAuth = useCallback(() => {
+    // If restricted (overstock/damages) and already pressed, don't allow again
+    if (restrictNotAuth && notAuthPressed) {
+      return;
+    }
+    
     // Add the asset image directly to gallery - use asset URL as preview
     // The blob will be created only when uploading
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -93,7 +106,12 @@ export default function ImagePanel({
     };
     
     setGallery((s) => [item, ...s]);
-  }, []);
+    
+    // Mark as pressed if restricted
+    if (restrictNotAuth) {
+      setNotAuthPressed(true);
+    }
+  }, [restrictNotAuth, notAuthPressed]);
 
   const handleRemove = useCallback((id: string) => {
     setGallery((s) => {
@@ -102,11 +120,28 @@ export default function ImagePanel({
       if (removed && removed.preview.startsWith('blob:')) {
         URL.revokeObjectURL(removed.preview);
       }
-      return s.filter((i) => i.id !== id);
+      const newGallery = s.filter((i) => i.id !== id);
+      
+      // If restricted and removed item was "not auth", check if any "not auth" items remain
+      if (restrictNotAuth && removed) {
+        const wasNotAuth = removed.isbn === "N/A" && (removed as GalleryItem & { assetUrl?: string }).assetUrl === notAuthImage;
+        if (wasNotAuth) {
+          // Check if any other "not auth" items exist in the new gallery
+          const hasNotAuth = newGallery.some(
+            (item) => item.isbn === "N/A" && (item as GalleryItem & { assetUrl?: string }).assetUrl === notAuthImage
+          );
+          // If no "not auth" items remain, reset the button state
+          if (!hasNotAuth) {
+            setNotAuthPressed(false);
+          }
+        }
+      }
+      
+      return newGallery;
     });
     // Also remove from upload results if present
     setUploadResults((r) => r.filter((res) => res.itemId !== id));
-  }, []);
+  }, [restrictNotAuth]);
 
   const handleMarkUploaded = useCallback((id: string) => {
     setGallery((s) =>
@@ -209,6 +244,7 @@ export default function ImagePanel({
     });
     setGallery([]);
     setUploadResults([]);
+    setNotAuthPressed(false); // Reset "Not Auth" button state when clearing
     onUploadResultsChange?.([]);
   }, [gallery, onUploadResultsChange]);
 
@@ -240,8 +276,11 @@ export default function ImagePanel({
         onCapture={handleCapture}
         additionalButtons={
           <button
-            className="px-3 py-2 bg-orange-500 text-white rounded w-full md:w-auto"
+            className={`px-3 py-2 bg-orange-500 text-white rounded w-full md:w-auto ${
+              restrictNotAuth && notAuthPressed ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
             onClick={handleAddNotAuth}
+            disabled={restrictNotAuth && notAuthPressed}
           >
             Not Auth
           </button>

@@ -65,18 +65,32 @@ export async function validateImageContent(blob: Blob): Promise<ValidationResult
 
 /**
  * Sanitize and validate account number
+ * For overstock/damages: Must be exactly 3 letters followed by 3 numbers (uppercase)
  */
-export function validateAccountNumber(accountNumber: string): ValidationResultWithValue<string> {
+export function validateAccountNumber(accountNumber: string, strictFormat: boolean = false): ValidationResultWithValue<string> {
   if (!accountNumber || accountNumber.trim().length === 0) {
     return { valid: false, error: 'Account number is required' };
   }
   
-  if (accountNumber.length > MAX_ACCOUNT_NUMBER_LENGTH) {
+  // Force uppercase
+  const upper = accountNumber.trim().toUpperCase();
+  
+  if (strictFormat) {
+    // For overstock/damages: Must be exactly 3 letters followed by 3 numbers
+    const pattern = /^[A-Z]{3}[0-9]{3}$/;
+    if (!pattern.test(upper)) {
+      return { valid: false, error: 'Account number must be 3 letters followed by 3 numbers (e.g., ABC123)' };
+    }
+    return { valid: true, sanitized: upper };
+  }
+  
+  // For other cases, use original validation
+  if (upper.length > MAX_ACCOUNT_NUMBER_LENGTH) {
     return { valid: false, error: `Account number must be less than ${MAX_ACCOUNT_NUMBER_LENGTH} characters` };
   }
   
   // Allow alphanumeric and common separators
-  const sanitized = accountNumber.trim().replace(/[^0-9A-Za-z\-_]/g, '');
+  const sanitized = upper.replace(/[^0-9A-Z\-_]/g, '');
   
   if (sanitized.length === 0) {
     return { valid: false, error: 'Account number contains invalid characters' };
@@ -87,12 +101,23 @@ export function validateAccountNumber(accountNumber: string): ValidationResultWi
 
 /**
  * Sanitize and validate invoice number
+ * For overstock/damages: Must be exactly 8 digits
  */
-export function validateInvoiceNumber(invoiceNumber: string): ValidationResultWithValue<string> {
+export function validateInvoiceNumber(invoiceNumber: string, strictFormat: boolean = false): ValidationResultWithValue<string> {
   if (!invoiceNumber || invoiceNumber.trim().length === 0) {
     return { valid: false, error: 'Invoice number is required' };
   }
   
+  if (strictFormat) {
+    // For overstock/damages: Must be exactly 8 digits
+    const digitsOnly = invoiceNumber.trim().replace(/\D/g, '');
+    if (digitsOnly.length !== 8) {
+      return { valid: false, error: 'Invoice number must be exactly 8 digits' };
+    }
+    return { valid: true, sanitized: digitsOnly };
+  }
+  
+  // For other cases, use original validation
   if (invoiceNumber.length > MAX_INVOICE_NUMBER_LENGTH) {
     return { valid: false, error: `Invoice number must be less than ${MAX_INVOICE_NUMBER_LENGTH} characters` };
   }
@@ -109,12 +134,23 @@ export function validateInvoiceNumber(invoiceNumber: string): ValidationResultWi
 
 /**
  * Sanitize and validate R number
+ * For overstock: Must be exactly 8 digits
  */
-export function validateRNumber(rNumber: string): ValidationResultWithValue<string> {
+export function validateRNumber(rNumber: string, strictFormat: boolean = false): ValidationResultWithValue<string> {
   if (!rNumber || rNumber.trim().length === 0) {
     return { valid: false, error: 'R number is required' };
   }
   
+  if (strictFormat) {
+    // For overstock: Must be exactly 8 digits
+    const digitsOnly = rNumber.trim().replace(/\D/g, '');
+    if (digitsOnly.length !== 8) {
+      return { valid: false, error: 'R number must be exactly 8 digits' };
+    }
+    return { valid: true, sanitized: digitsOnly };
+  }
+  
+  // For other cases, use original validation
   if (rNumber.length > MAX_R_NUMBER_LENGTH) {
     return { valid: false, error: `R number must be less than ${MAX_R_NUMBER_LENGTH} characters` };
   }

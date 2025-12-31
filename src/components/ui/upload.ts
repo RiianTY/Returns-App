@@ -251,18 +251,18 @@ export async function insertOverstockData(
   // Import validation functions
   const { validateInvoiceNumber, validateAccountNumber, validateRNumber, validateNumericString } = await import("@/lib/validation");
 
-  // Validate and sanitize inputs
-  const invoiceValidation = validateInvoiceNumber(invoiceNumber);
+  // Validate and sanitize inputs (strict format for overstock)
+  const invoiceValidation = validateInvoiceNumber(invoiceNumber, true);
   if (!invoiceValidation.valid) {
     throw new Error(invoiceValidation.error || "Invalid invoice number");
   }
 
-  const accountValidation = validateAccountNumber(accountNumber);
+  const accountValidation = validateAccountNumber(accountNumber, true);
   if (!accountValidation.valid) {
     throw new Error(accountValidation.error || "Invalid account number");
   }
 
-  const rNumberValidation = validateRNumber(returnsNumber);
+  const rNumberValidation = validateRNumber(returnsNumber, true);
   if (!rNumberValidation.valid) {
     throw new Error(rNumberValidation.error || "Invalid R number");
   }
@@ -412,13 +412,13 @@ export async function insertDamagesData(
   // Import validation functions
   const { validateInvoiceNumber, validateAccountNumber, validateNumericString } = await import("@/lib/validation");
 
-  // Validate and sanitize inputs
-  const invoiceValidation = validateInvoiceNumber(invoiceNumber);
+  // Validate and sanitize inputs (strict format for damages)
+  const invoiceValidation = validateInvoiceNumber(invoiceNumber, true);
   if (!invoiceValidation.valid) {
     throw new Error(invoiceValidation.error || "Invalid invoice number");
   }
 
-  const accountValidation = validateAccountNumber(accountNumber);
+  const accountValidation = validateAccountNumber(accountNumber, true);
   if (!accountValidation.valid) {
     throw new Error(accountValidation.error || "Invalid account number");
   }

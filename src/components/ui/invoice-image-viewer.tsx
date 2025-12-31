@@ -36,6 +36,7 @@ export default function InvoiceImageViewer({
 }: InvoiceImageViewerProps) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [imageSizes, setImageSizes] = useState<{ [key: number]: number }>({});
+  const [imageUrls, setImageUrls] = useState<{ [key: number]: string }>({});
 
   // Extract filename from URL
   const getFilename = (index: number): string => {
@@ -64,34 +65,52 @@ export default function InvoiceImageViewer({
     }
   };
 
-  // Fetch image size
+  // Fetch images once and get their sizes, then create object URLs for display
   useEffect(() => {
-    const fetchImageSizes = async () => {
+    const fetchImages = async () => {
       const sizes: { [key: number]: number } = {};
+      const urls: { [key: number]: string } = {};
+      
       await Promise.all(
         images.map(async (url, index) => {
           try {
-            const response = await fetch(url, { method: 'HEAD' });
-            const contentLength = response.headers.get('content-length');
-            if (contentLength) {
-              sizes[index] = parseInt(contentLength, 10);
-            } else {
-              // Fallback: fetch the full image
-              const imgResponse = await fetch(url);
-              const blob = await imgResponse.blob();
+            // Fetch the image once
+            const response = await fetch(url, { mode: 'cors' });
+            if (response.ok) {
+              const blob = await response.blob();
               sizes[index] = blob.size;
+              
+              // Create object URL from the blob for display (avoids re-fetching)
+              const objectUrl = URL.createObjectURL(blob);
+              urls[index] = objectUrl;
             }
           } catch (error) {
-            logger.error(`Error fetching image size for ${url}:`, error);
+            // If fetch fails, fall back to original URL
+            logger.error(`Error fetching image ${index + 1}:`, error);
+            urls[index] = url;
           }
         })
       );
+      
       setImageSizes(sizes);
+      setImageUrls(urls);
     };
 
     if (images.length > 0) {
-      fetchImageSizes();
+      fetchImages();
     }
+    
+    // Cleanup: revoke object URLs when component unmounts or images change
+    return () => {
+      setImageUrls(prevUrls => {
+        Object.values(prevUrls).forEach(url => {
+          if (url.startsWith('blob:')) {
+            URL.revokeObjectURL(url);
+          }
+        });
+        return {};
+      });
+    };
   }, [images]);
 
   const openImageViewer = (index: number) => {
@@ -194,16 +213,13 @@ export default function InvoiceImageViewer({
           >
             <ItemHeader className="flex justify-center">
               <img
-                src={src}
+                src={imageUrls[i] || src}
                 alt={`img-${i}`}
                 className="w-28 h-28 object-cover rounded-sm text-wrap text-center"
                 onError={(e) => {
                   console.error("Failed to load image:", src);
                   const target = e.target as HTMLImageElement;
                   target.style.display = 'none';
-                }}
-                onLoad={() => {
-                  console.log("Image loaded:", src);
                 }}
               />
             </ItemHeader>
@@ -277,7 +293,7 @@ export default function InvoiceImageViewer({
 
             {/* Image */}
             <img
-              src={images[selectedImageIndex]}
+              src={imageUrls[selectedImageIndex] || images[selectedImageIndex]}
               alt={`Invoice ${invoiceNumber} - Image ${selectedImageIndex + 1}`}
               className="max-w-full max-h-full object-contain"
             />

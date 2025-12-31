@@ -56,9 +56,6 @@ export default function Gallery({
                   const target = e.target as HTMLImageElement;
                   target.style.display = 'none';
                 }}
-                onLoad={() => {
-                  console.log("Image preview loaded:", item.fileName);
-                }}
               />
             </ItemHeader>
             <ItemContent className="text-center flex-1 flex flex-col items-center text-wrap justify-center w-24">

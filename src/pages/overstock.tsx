@@ -33,6 +33,7 @@ export default function Overstock() {
       <ImagePanel 
         onUploadResultsChange={setUploadResults}
         invoiceNumber={invoiceNumber}
+        isOverstock={true}
         onUploadAllUnuploadedReady={(uploadFn) => {
           uploadAllUnuploadedRef.current = uploadFn;
         }}

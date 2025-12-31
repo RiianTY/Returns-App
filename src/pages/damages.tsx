@@ -33,6 +33,7 @@ export default function Damages() {
       <ImagePanel 
         onUploadResultsChange={setUploadResults}
         invoiceNumber={invoiceNumber}
+        isDamages={true}
         onUploadAllUnuploadedReady={(uploadFn) => {
           uploadAllUnuploadedRef.current = uploadFn;
         }}

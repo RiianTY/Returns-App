@@ -56,10 +56,40 @@ export default function FormData({
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    let processedValue = value;
+    
+    // Apply formatting for overstock/damages
+    if (isOverstock || isDamages) {
+      if (name === "accNumber") {
+        // Account number: force uppercase, enforce 3 letters then 3 numbers pattern
+        const upper = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        let letters = '';
+        let numbers = '';
+        
+        // Separate letters and numbers
+        for (const char of upper) {
+          if (/[A-Z]/.test(char) && letters.length < 3) {
+            letters += char;
+          } else if (/[0-9]/.test(char) && numbers.length < 3) {
+            numbers += char;
+          }
+        }
+        
+        // Combine: letters first, then numbers
+        processedValue = letters + numbers;
+      } else if (name === "creditNumber") {
+        // Invoice number: only digits, limit to 8
+        processedValue = value.replace(/\D/g, '').slice(0, 8);
+      } else if (name === "rNumber" && isOverstock) {
+        // R number: only digits, limit to 8
+        processedValue = value.replace(/\D/g, '').slice(0, 8);
+      }
+    }
+    
+    setFormData((prev) => ({ ...prev, [name]: processedValue }));
     // Notify parent of invoice number changes for overstock or damages
     if ((isOverstock || isDamages) && name === "creditNumber" && onInvoiceNumberChange) {
-      onInvoiceNumberChange(value);
+      onInvoiceNumberChange(processedValue);
     }
   };
 
@@ -68,14 +98,14 @@ export default function FormData({
     
     // Validate inputs - R number only required if not damages
     if (!isDamages) {
-      const rNumberValidation = validateRNumber(formData.rNumber);
+      const rNumberValidation = validateRNumber(formData.rNumber, isOverstock);
       if (!rNumberValidation.valid) {
         toast.error(rNumberValidation.error || "Invalid R number");
         return;
       }
     }
 
-    const accNumberValidation = validateAccountNumber(formData.accNumber);
+    const accNumberValidation = validateAccountNumber(formData.accNumber, isOverstock || isDamages);
     if (!accNumberValidation.valid) {
       toast.error(accNumberValidation.error || "Invalid account number");
       return;
@@ -87,7 +117,7 @@ export default function FormData({
         toast.error("Please enter an invoice number (Credit Number)");
         return;
       }
-      const invoiceValidation = validateInvoiceNumber(formData.creditNumber);
+      const invoiceValidation = validateInvoiceNumber(formData.creditNumber, true);
       if (!invoiceValidation.valid) {
         toast.error(invoiceValidation.error || "Invalid invoice number");
         return;
@@ -220,28 +250,34 @@ export default function FormData({
         <div className="flex flex-col gap-2">
         <Input
           name="accNumber"
-          placeholder="Acc Number (eg. RRR001)"
+          placeholder={isOverstock || isDamages ? "Acc Number (eg. ABC123)" : "Acc Number (eg. RRR001)"}
           required
           value={formData.accNumber}
           onChange={handleChange}
+          maxLength={isOverstock || isDamages ? 6 : undefined}
+          style={isOverstock || isDamages ? { textTransform: 'uppercase' } : undefined}
         />
         {isDamages === false ? (
           <Input
             name="rNumber"
-            placeholder="R Number (eg. 56012322)"
+            placeholder={isOverstock ? "R Number (8 digits, eg. 56012322)" : "R Number (eg. 56012322)"}
             required={isDamages === false}
             value={formData.rNumber}
             onChange={handleChange}
+            maxLength={isOverstock ? 8 : undefined}
+            type={isOverstock ? "tel" : "text"}
           />
         ) : null}
         <Input
           name="creditNumber"
           placeholder={
-            "Invoice Number (eg. 21000000)"
+            isOverstock || isDamages ? "Invoice Number (8 digits, eg. 21000000)" : "Invoice Number (eg. 21000000)"
           }
           value={formData.creditNumber}
           onChange={handleChange}
           required={isOverstock || isDamages}
+          maxLength={isOverstock || isDamages ? 8 : undefined}
+          type={isOverstock || isDamages ? "tel" : "text"}
         />
         </div>
         <div className="flex flex-col gap-2">
