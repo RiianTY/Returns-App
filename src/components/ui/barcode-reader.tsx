@@ -15,7 +15,7 @@ export default function BarcodeReader({
   onDecode,
   onCapture,
   fps = 10,
-  qrbox = 250,
+  qrbox = 350,
   additionalButtons,
   rightContent,
 }: BarcodeReaderProps) {
@@ -24,6 +24,7 @@ export default function BarcodeReader({
   );
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [cameraId, setCameraId] = useState<string | null>(null);
+  const [cameraCount, setCameraCount] = useState<number>(0);
   const [scanning, setScanning] = useState(false);
   const [_lastResult, setLastResult] = useState<string | null>(null);
   const [detectedIsbn, setDetectedIsbn] = useState<string | null>(null);
@@ -34,6 +35,14 @@ export default function BarcodeReader({
   const [captureOpen, setCaptureOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const captureInProgressRef = useRef(false);
+
+  // Helper function to detect if device is mobile/tablet (2+ cameras) vs desktop (1 camera)
+  const isMobileDevice = () => {
+    // Mobile devices (phones/tablets) typically have 2 cameras (front + back)
+    // Desktop devices typically have 1 camera (webcam)
+    return cameraCount >= 2;
+  };
 
   // helpers: ISBN normalization & validation
   const isValidISBN10 = (isbn10: string) => {
@@ -114,6 +123,11 @@ export default function BarcodeReader({
         const mediaDevices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = mediaDevices.filter(device => device.kind === 'videoinput');
         
+        // Store camera count for mobile/desktop detection
+        if (mounted) {
+          setCameraCount(videoDevices.length);
+        }
+        
         if (videoDevices.length && mounted) {
           // Find back-facing camera by label
           const backKeywords = ['back', 'rear', 'environment', 'rear-facing', 'back-facing'];
@@ -149,6 +163,8 @@ export default function BarcodeReader({
         Html5Qrcode.getCameras()
           .then((devices) => {
             if (!mounted) return;
+            // Store camera count for mobile/desktop detection
+            setCameraCount(devices.length);
             if (devices.length) {
               const selectedCameraId = findBackCamera(devices);
               if (selectedCameraId) {
@@ -172,24 +188,85 @@ export default function BarcodeReader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Add CSS to ensure scanner video fills container on mobile
+  // Add CSS to ensure scanner video fills container - fullscreen on mobile/tablet
   useEffect(() => {
     if (scanning) {
+      const isMobile = cameraCount >= 2;
       const style = document.createElement('style');
       style.textContent = `
+        #${containerIdRef.current} {
+          ${isMobile ? `
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            overflow: hidden !important;
+          ` : `
+            width: 100% !important;
+            min-height: 400px !important;
+            height: 100% !important;
+            display: block !important;
+            position: relative !important;
+            overflow: hidden !important;
+          `}
+        }
         #${containerIdRef.current} video,
         #${containerIdRef.current} canvas {
+          ${isMobile ? `
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: cover !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            transform: scale(1.2) !important;
+            transform-origin: center center !important;
+          ` : `
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            min-height: 400px !important;
+            max-height: 80vh !important;
+            object-fit: contain !important;
+            display: block !important;
+            margin: 0 auto !important;
+            transform: scale(1.2) !important;
+            transform-origin: center center !important;
+          `}
+        }
+        /* Ensure scanning box overlay is not affected by video transforms */
+        #${containerIdRef.current} > div > div[style*="position"] {
+          transform: none !important;
+          z-index: 10002 !important;
+        }
+        #${containerIdRef.current} > div {
           width: 100% !important;
           height: 100% !important;
-          object-fit: cover !important;
+          position: relative !important;
         }
-        @media (min-width: 768px) {
-          #${containerIdRef.current} video,
-          #${containerIdRef.current} canvas {
-            width: auto !important;
-            height: auto !important;
-            object-fit: contain !important;
-          }
+        /* Ensure Html5Qrcode scanning box is fully visible */
+        /* Target all possible scanning box elements */
+        #${containerIdRef.current} div[id*="qr"],
+        #${containerIdRef.current} div[class*="qr"],
+        #${containerIdRef.current} div[id*="shaded"],
+        #${containerIdRef.current} div[class*="shaded"] {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+        /* Ensure the scanning box border is visible and styled */
+        #${containerIdRef.current} div[style*="border"] {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          z-index: 10001 !important;
+        }
+        /* Make sure the scanning area box is centered and visible */
+        #${containerIdRef.current} > div > div[style*="position"] {
+          display: block !important;
+          visibility: visible !important;
         }
       `;
       document.head.appendChild(style);
@@ -199,7 +276,7 @@ export default function BarcodeReader({
         }
       };
     }
-  }, [scanning]);
+  }, [scanning, cameraCount]);
 
   const startScanner = async () => {
     setError(null);
@@ -213,15 +290,32 @@ export default function BarcodeReader({
     }
 
     try {
-      // On mobile, use larger qrbox for better scanning experience
-      const isMobile = window.innerWidth < 768;
-      const mobileQrbox = isMobile ? { width: 300, height: 300 } : qrbox;
+      // Calculate responsive qrbox size based on viewport width
+      // Small screens (< 640px): 250x250
+      // Medium screens (640px - 1024px): 350x350
+      // Large screens (> 1024px): 450x450
+      const viewportWidth = window.innerWidth;
+      let calculatedQrbox: number | { width: number; height: number };
+      
+      if (viewportWidth < 640) {
+        // Small screens (sm)
+        calculatedQrbox = { width: 250, height: 250 };
+      } else if (viewportWidth < 1024) {
+        // Medium screens (md)
+        calculatedQrbox = { width: 450, height: 350 };
+      } else {
+        // Large screens (lg and above)
+        calculatedQrbox = { width: 550, height: 450 };
+      }
+      
+      // Use calculated size, but allow override from prop if it's an object
+      const finalQrbox = typeof qrbox === 'object' ? qrbox : calculatedQrbox;
       
       await scannerRef.current.start(
         cameraId,
         {
           fps,
-          qrbox: mobileQrbox,
+          qrbox: finalQrbox,
           aspectRatio: 1.0, // Square aspect ratio for better mobile experience
         },
         (decodedText) => {
@@ -231,10 +325,7 @@ export default function BarcodeReader({
             setDetectedIsbn(isbn);
             setLastResult(decodedText);
             onDecode?.(isbn);
-            // open capture UI automatically for ISBN
-            startCapture().catch((e) => {
-              logger.error("capture start failed", e);
-            });
+            // Don't auto-open capture - wait for user confirmation
           } else {
             setDetectedIsbn(null);
             setLastResult(decodedText);
@@ -267,13 +358,22 @@ export default function BarcodeReader({
 
   // Capture helpers - use native mobile camera or desktop video stream
   const startCapture = async () => {
-    const isMobile = window.innerWidth < 768;
+    // Prevent multiple concurrent capture attempts
+    if (captureInProgressRef.current) {
+      return;
+    }
     
-    // On mobile, use native camera app
+    captureInProgressRef.current = true;
+    const isMobile = isMobileDevice();
+    
+    // On mobile/tablet (2+ cameras), use native camera app
     if (isMobile) {
       try {
         // stop scanner to free camera resources
         await stopScanner();
+        // Add delay to ensure camera resources are fully released before opening native camera app
+        // This is necessary on mobile devices where the camera stream needs time to be released
+        await new Promise(resolve => setTimeout(resolve, 300));
       } catch {
         /* ignore */
       }
@@ -283,7 +383,20 @@ export default function BarcodeReader({
       if (fileInputRef.current) {
         // Set capture attribute to "environment" for back camera
         fileInputRef.current.setAttribute('capture', 'environment');
-        fileInputRef.current.click();
+        // Use setTimeout to ensure the click happens in the next event loop cycle
+        setTimeout(() => {
+          if (fileInputRef.current) {
+            fileInputRef.current.click();
+            // Reset flag after a delay to allow for camera app to open
+            setTimeout(() => {
+              captureInProgressRef.current = false;
+            }, 1000);
+          } else {
+            captureInProgressRef.current = false;
+          }
+        }, 0);
+      } else {
+        captureInProgressRef.current = false;
       }
     } else {
       // On desktop, use inline video stream
@@ -307,6 +420,7 @@ export default function BarcodeReader({
         
         streamRef.current = stream;
         setCaptureOpen(true);
+        captureInProgressRef.current = false; // Reset flag when capture opens
         
         // Wait for video element to be available
         setTimeout(() => {
@@ -318,6 +432,7 @@ export default function BarcodeReader({
       } catch (e) {
         setError(`Failed to start camera: ${e}`);
         logger.error("Failed to start capture stream", e);
+        captureInProgressRef.current = false; // Reset flag on error
       }
     }
   };
@@ -392,6 +507,7 @@ export default function BarcodeReader({
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+      captureInProgressRef.current = false; // Reset flag if no file or ISBN
       return;
     }
 
@@ -430,9 +546,13 @@ export default function BarcodeReader({
         canvas.toBlob(
           (blob) => {
             URL.revokeObjectURL(objectUrl);
-            if (!blob) return;
+            if (!blob) {
+              captureInProgressRef.current = false; // Reset flag if blob creation fails
+              return;
+            }
             const fileName = `${isbn}_${Date.now()}.jpg`;
             onCapture?.(isbn, fileName, blob);
+            captureInProgressRef.current = false; // Reset flag after successful capture
           },
           "image/jpeg",
           0.95  // Higher quality (0.95 instead of 0.9)
@@ -442,11 +562,13 @@ export default function BarcodeReader({
       img.onerror = () => {
         URL.revokeObjectURL(objectUrl);
         setError("Failed to load image");
+        captureInProgressRef.current = false; // Reset flag on image load error
       };
       
       img.src = objectUrl;
     } catch (e) {
       setError(String(e));
+      captureInProgressRef.current = false; // Reset flag on error
     } finally {
       // Reset input so same file can be selected again
       if (fileInputRef.current) {
@@ -454,6 +576,8 @@ export default function BarcodeReader({
       }
     }
   };
+
+  const isMobile = cameraCount >= 2;
 
   return (
     <div className="space-y-3">
@@ -480,34 +604,66 @@ export default function BarcodeReader({
         </div>
       )}
 
-      {/* Fullscreen container on mobile when scanning */}
-      <div className={`${scanning ? 'fixed inset-0 z-50 bg-black md:relative md:z-auto md:bg-transparent flex flex-col' : ''}`}>
+      {/* Scanner container - always present, visibility controlled by scanning state */}
+      <div 
+        className={scanning && isMobile ? "fixed inset-0 z-[9999] bg-black" : scanning ? "relative bg-black rounded-lg overflow-hidden w-full z-10" : "hidden"}
+      >
+        {/* Controls overlay - only show when scanning */}
         {scanning && (
-          <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-center md:relative md:top-0 md:left-0 md:right-0 md:mb-2">
+          <div className={isMobile ? "absolute top-4 left-4 right-4 z-10 flex justify-between items-center" : "absolute top-4 left-4 z-10"}>
             <button
-              className="px-3 py-2 bg-red-500 text-white rounded"
+              className={isMobile ? "px-4 py-2 bg-red-500 text-white rounded-lg shadow-lg" : "px-3 py-2 bg-red-500 text-white rounded"}
               onClick={stopScanner}
             >
               Stop
             </button>
-            {rightContent && (
-              <div className="flex items-center text-white md:text-gray-600">
+            {rightContent && isMobile && (
+              <div className="flex items-center text-white">
                 {rightContent}
               </div>
             )}
           </div>
         )}
+        
+        {/* ISBN Display - show detected ISBN above the scanning box */}
+        {scanning && detectedIsbn && (
+          <div className={isMobile ? "fixed top-1/2 left-1/2 transform -translate-x-1/2 z-[10000] -mt-[250px]" : "absolute top-1/2 left-1/2 transform -translate-x-1/2 z-[10000] -mt-[250px]"}>
+            <div className="bg-black bg-opacity-75 rounded-lg px-6 py-3 shadow-2xl absolute top-10 left-1/2 transform -translate-x-1/2">
+              <p className="text-xs text-white mb-1 text-center">Detected ISBN:</p>
+              <h3 className="text-xl font-bold text-white text-center">{detectedIsbn}</h3>
+            </div>
+          </div>
+        )}
+        
+        {/* Capture Buttons - at the bottom of the screen */}
+        {scanning && detectedIsbn && (
+          <div className={isMobile ? "fixed bottom-4 left-4 right-4 z-[10000]" : "absolute bottom-4 left-4 right-4 z-[10000]"}>
+            <div className="flex gap-3 justify-center">
+              <button
+                className="flex-1 max-w-xs px-6 py-4 bg-green-500 text-white rounded-lg font-semibold text-lg hover:bg-green-600 transition-colors shadow-lg"
+                onClick={() => {
+                  startCapture().catch((e) => {
+                    logger.error("capture start failed", e);
+                  });
+                }}
+              >
+                Confirm & Capture
+              </button>
+              <button
+                className="px-6 py-4 bg-gray-600 text-white rounded-lg font-semibold text-lg hover:bg-gray-700 transition-colors shadow-lg"
+                onClick={() => {
+                  setDetectedIsbn(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Scanner container - always present for Html5Qrcode */}
         <div 
           id={containerIdRef.current} 
-          className={`w-full ${scanning ? 'flex-1 md:flex-none' : ''}`}
-          style={scanning ? { 
-            minHeight: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            height: '100%'
-          } : {}}
+          className={scanning && !isMobile ? "w-full min-h-[400px]" : ""}
         />
       </div>
 

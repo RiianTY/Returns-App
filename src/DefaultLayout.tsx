@@ -66,7 +66,7 @@ function DefaultLayout({ children }: { children: React.ReactNode }) {
       <footer className="bg-gray-200 text-center p-4 ">
         &copy; {new Date().getFullYear()} Techra. All rights reserved.
         <br />
-        Version 0.9.9
+        Version 0.10.0
       </footer>
     </div>
   );
